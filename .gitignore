@@ -1,0 +1,50 @@
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Database — protect both the project DB and any SQLite tempfiles
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude Code local settings (per-developer permissions)
+.claude/
+
+# Logs & captured process output
+*.log
+logs/
+nohup.out
+/tmp/
+
+# Distribution
+*.tar.gz
+*.whl
