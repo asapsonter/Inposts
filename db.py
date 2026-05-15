@@ -24,9 +24,16 @@ def init_db() -> sqlite3.Connection:
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             linkedin_id TEXT,
             content     TEXT,
+            image_url   TEXT,
             created_at  TEXT DEFAULT (datetime('now'))
         )
     """)
+    # Migration for databases created before image_url existed. SQLite's
+    # ALTER TABLE raises if the column is already there — swallow that case.
+    try:
+        conn.execute("ALTER TABLE posts ADD COLUMN image_url TEXT")
+    except sqlite3.OperationalError:
+        pass
     # Single-row table (id always = 1) holding the live posting schedule.
     # UI edits go here, scheduler + CLI loop both read from here.
     conn.execute("""
@@ -125,10 +132,15 @@ def mark_seen(conn: sqlite3.Connection, url: str, title: str, source: str):
     )
     conn.commit()
 
-def save_post(conn: sqlite3.Connection, content: str, linkedin_id: str):
+def save_post(
+    conn: sqlite3.Connection,
+    content: str,
+    linkedin_id: str,
+    image_url: str | None = None,
+):
     conn.execute(
-        "INSERT INTO posts (linkedin_id, content) VALUES (?, ?)",
-        (linkedin_id, content),
+        "INSERT INTO posts (linkedin_id, content, image_url) VALUES (?, ?, ?)",
+        (linkedin_id, content, image_url),
     )
     conn.commit()
 

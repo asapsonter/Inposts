@@ -15,13 +15,19 @@ _IMG_EXT_RE = re.compile(r"\.(jpe?g|png|webp|gif)(\?|$)", re.IGNORECASE)
 _IMG_TAG_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
 
 
+def _is_downloadable_image_url(url: str | None) -> bool:
+    """Reject empty / data: / mailto: etc. — only real http(s) URLs can be
+    fetched and uploaded to LinkedIn."""
+    return bool(url) and url.startswith(("http://", "https://"))
+
+
 def _extract_image_url(entry) -> str | None:
     """Best-effort: pull the first usable image URL from a feedparser entry."""
     # 1. <media:content> / <media:thumbnail> — used by Wired, TechCrunch, Ars Technica
     for attr in ("media_content", "media_thumbnail"):
         for item in getattr(entry, attr, None) or []:
             url = item.get("url")
-            if not url:
+            if not _is_downloadable_image_url(url):
                 continue
             medium = item.get("medium", "")
             mtype = item.get("type", "")
@@ -31,7 +37,7 @@ def _extract_image_url(entry) -> str | None:
     # 2. <enclosure> attachments
     for enc in getattr(entry, "enclosures", None) or []:
         url = enc.get("href") or enc.get("url")
-        if url and enc.get("type", "").startswith("image/"):
+        if _is_downloadable_image_url(url) and enc.get("type", "").startswith("image/"):
             return url
 
     # 3. First <img> embedded in summary / content HTML
@@ -40,9 +46,10 @@ def _extract_image_url(entry) -> str | None:
         if isinstance(val, list) and val:
             val = val[0].get("value", "") if isinstance(val[0], dict) else ""
         if isinstance(val, str):
-            m = _IMG_TAG_RE.search(val)
-            if m:
-                return m.group(1)
+            for m in _IMG_TAG_RE.finditer(val):
+                candidate = m.group(1)
+                if _is_downloadable_image_url(candidate):
+                    return candidate
 
     return None
 

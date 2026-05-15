@@ -1,7 +1,7 @@
 import logging
 import sys
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -11,6 +11,37 @@ from config import config
 log = logging.getLogger("autoposter.social")
 
 LINKEDIN_API_VERSION = "202604"
+
+# Pose as a real desktop browser when fetching source images. Most WordPress
+# sites (the African tech feeds in particular) run anti-hotlinking plugins
+# that 403 anything that looks like `python-requests/...`. A Chrome-like UA
+# plus a same-origin Referer gets us past virtually all of them.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
+
+
+def _download_source_image(image_url: str) -> bytes | None:
+    """Fetch image bytes from a remote source. Sends browser-like headers
+    so hotlink-protected sites (WordPress etc.) return the image rather
+    than a 403. Returns None on failure."""
+    parsed = urlparse(image_url)
+    same_origin = f"{parsed.scheme}://{parsed.netloc}/"
+    headers = {
+        "User-Agent": _BROWSER_UA,
+        "Referer": same_origin,
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    try:
+        r = requests.get(image_url, headers=headers, timeout=30, allow_redirects=True)
+        r.raise_for_status()
+        return r.content
+    except requests.RequestException as e:
+        log.warning("Could not download source image %s: %s", image_url, e)
+        return None
 # How long to wait for LinkedIn to finish ingesting an uploaded image
 # before giving up and posting text-only. LinkedIn's image upload is
 # async — referencing the URN before it reaches AVAILABLE causes the
@@ -67,13 +98,10 @@ def _upload_image_to_linkedin(image_url: str) -> str | None:
     token = config.linkedin_access_token
     author = config.linkedin_author_urn
 
-    # 1. Fetch source image bytes
-    try:
-        img_resp = requests.get(image_url, timeout=30)
-        img_resp.raise_for_status()
-        image_bytes = img_resp.content
-    except requests.RequestException as e:
-        log.warning("Could not download source image %s: %s", image_url, e)
+    # 1. Fetch source image bytes (with browser headers to bypass WordPress
+    #    hotlink protection — most African tech feeds 403 default requests.)
+    image_bytes = _download_source_image(image_url)
+    if image_bytes is None:
         return None
 
     init_headers = {

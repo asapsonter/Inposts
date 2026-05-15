@@ -129,7 +129,7 @@ def generate_and_publish(
     )
     from db import save_post
     if post_id:
-        save_post(conn, post_text, post_id)
+        save_post(conn, post_text, post_id, image_url=image_url)
     result["posted"] = True
     result["post_id"] = post_id
     return result
