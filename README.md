@@ -14,7 +14,9 @@ An automated tool that fetches the hottest tech news daily, generates a professi
 - [Configuration](#configuration)
 - [Getting LinkedIn API Credentials](#getting-linkedin-api-credentials)
 - [Usage](#usage)
-- [Scheduling (Automated Daily Posts)](#scheduling-automated-daily-posts)
+  - [Web UI Dashboard (Recommended)](#web-ui-dashboard-recommended)
+  - [CLI Commands](#cli-commands)
+- [Scheduling (Automated Posts)](#scheduling-automated-posts)
 - [Customization](#customization)
 - [Troubleshooting](#troubleshooting)
 
@@ -256,7 +258,37 @@ LINKEDIN_AUTHOR_URN=urn:li:person:your_id_here
 
 ## Usage
 
-### Fetch & Rank Articles Only (No AI, No Posting)
+### Web UI Dashboard (Recommended)
+
+The primary way to use InPosts is through its browser dashboard, which lets you browse ranked articles, pick a specific one to post about, view past posts, and configure the auto-posting schedule — all without touching the terminal.
+
+**Start the server** (run this from the project root, with Ollama already running):
+
+```bash
+venv/bin/uvicorn app:app --host 127.0.0.1 --port 5050 --log-level info
+```
+
+Then open **[http://localhost:5050](http://localhost:5050)** in your browser.
+
+The dashboard shows:
+
+- **Auto-posting schedule card** — at the top of the page. Flip the switch to enable, click **Edit schedule** to pick a mode:
+  - **Every N hours** — fires every N hours from the last run
+  - **Every N days at HH:MM** — fires every N days at a specific clock time (e.g. every 3 days at 12:00)
+
+  Click **Save schedule** and the change applies to the running scheduler immediately. The card shows the human-readable summary plus the next scheduled run time.
+
+- **Generate & Post Now** — let the LLM pick today's hottest article and publish.
+- **Choose Article** — open a modal listing the top 20 ranked articles with thumbnails, click any one to write a post specifically about that story.
+- **Post history** — every published post with a "View on LinkedIn" link.
+
+**Important**: the scheduler runs *inside* this `uvicorn` process. It stops the moment you `Ctrl+C` the server. To run it 24/7, start `uvicorn` under a process supervisor like `systemd`, `launchctl`, or `pm2` — or inside `tmux`/`screen` so it survives logout. See [Scheduling](#scheduling-automated-posts) below.
+
+> The CLI commands in the next section still work and share the same SQLite schedule the UI writes to — they're useful for ad-hoc dry-runs, debugging, or headless servers without a browser.
+
+### CLI Commands
+
+#### Fetch & Rank Articles Only (No AI, No Posting)
 
 Quick check to see what articles are trending:
 
@@ -273,7 +305,7 @@ Output:
   ...
 ```
 
-### Dry Run (Generate Post, Don't Publish)
+#### Dry Run (Generate Post, Don't Publish)
 
 Fetches articles, generates a post via DeepSeek R1, and prints it to the console. Nothing is posted to LinkedIn.
 
@@ -283,31 +315,49 @@ python autoposter.py
 
 This is the **default mode** — safe for testing. Articles are still marked as "seen" in the database to avoid regenerating the same content.
 
-### Publish to LinkedIn
+#### Publish to LinkedIn
 
 ```bash
 python autoposter.py --post
 ```
 
-This runs the full pipeline and actually publishes the generated post to your LinkedIn profile.
+Runs the full pipeline and publishes the generated post to your LinkedIn profile.
 
-### Continuous Loop Mode
-
-Runs forever, executing the pipeline once daily at the configured time (default 11:00 AM):
+#### Continuous Loop Mode
 
 ```bash
-# Dry-run loop (generates but doesn't post)
 python autoposter.py --loop
-
-# Live posting loop
-python autoposter.py --loop --post
 ```
+
+Reads the schedule from SQLite (the same row the dashboard writes to) and fires posts on time. Useful for headless servers without a browser.
+
+> ⚠️ **Do not run `--loop` while `uvicorn app:app` is also running.** Both processes would read the same schedule and double-post. Choose one or the other.
 
 ---
 
-## Scheduling (Automated Daily Posts)
+## Scheduling (Automated Posts)
 
-### Option 1: Cron (Recommended for macOS/Linux)
+The recommended way to schedule auto-posts is the **dashboard** ([Web UI Dashboard](#web-ui-dashboard-recommended)) — open the schedule card, pick a mode, click save. The scheduler runs inside the `uvicorn` process and fires posts on time.
+
+To run uvicorn 24/7 in the background, use one of the deployment patterns below.
+
+### Option A: tmux / screen (quick + simple)
+
+```bash
+tmux new -s inposts
+venv/bin/uvicorn app:app --host 127.0.0.1 --port 5050 --log-level info
+# Detach with Ctrl+B then D — uvicorn keeps running.
+# Reattach later with: tmux attach -t inposts
+```
+
+### Option B: nohup (background, no terminal)
+
+```bash
+nohup venv/bin/uvicorn app:app --host 127.0.0.1 --port 5050 --log-level info \
+    > logs/uvicorn.log 2>&1 &
+```
+
+### Option C: System Cron
 
 Edit your crontab:
 
@@ -337,20 +387,17 @@ To check logs:
 tail -50 /tmp/autoposter.log
 ```
 
-### Option 2: Loop Mode (No Cron Needed)
+### Option D: Headless `--loop` (No Web UI)
 
-If you prefer not to use cron, run the script in loop mode. It sleeps until the target time and runs the pipeline:
+If you don't need the dashboard, run the scheduler as a standalone CLI process:
 
 ```bash
-# Run in the background with nohup
-nohup ./venv/bin/python autoposter.py --loop --post >> /tmp/autoposter.log 2>&1 &
+nohup ./venv/bin/python autoposter.py --loop >> logs/autoposter.log 2>&1 &
 ```
 
-Configure the time in `.env`:
-```
-POST_HOUR=11
-POST_MINUTE=0
-```
+This reads the same schedule from SQLite. Edit the schedule via the dashboard once (anywhere, even on your laptop), then run the loop on the headless server.
+
+> ⚠️ Don't run both `uvicorn app:app` and `autoposter.py --loop` on the same server / same database — they'd fire twice per slot.
 
 ---
 

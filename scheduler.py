@@ -15,10 +15,28 @@ from db import init_db, get_schedule, update_schedule
 
 log = logging.getLogger("autoposter.scheduler")
 
-# How often to wake up and re-check the schedule. Smaller = more responsive
-# to UI changes; larger = less CPU. 60s is a reasonable balance for a
-# minute-grained scheduler.
+# Maximum sleep between schedule re-checks. The loop also wakes immediately
+# whenever request_wake() is called (e.g. from the PUT /api/schedule
+# handler), so UI changes apply instantly even though this is set to 60s.
 TICK_SECONDS = 60
+
+# Module-level handles set by scheduler_loop() at startup. request_wake()
+# uses these to nudge the running loop from any thread (FastAPI sync
+# handlers run in a thread pool, not on the event loop).
+_loop: asyncio.AbstractEventLoop | None = None
+_wake_event: asyncio.Event | None = None
+
+
+def request_wake() -> None:
+    """Ask the scheduler to re-check its plan right now instead of waiting
+    for the next tick. Safe to call from anywhere — including sync FastAPI
+    handlers — because it dispatches the set() onto the scheduler's loop.
+
+    If the scheduler isn't running (e.g. CLI mode hasn't started yet, or
+    uvicorn isn't up), this is a no-op."""
+    if _loop is None or _wake_event is None:
+        return
+    _loop.call_soon_threadsafe(_wake_event.set)
 
 
 def compute_next_run(schedule: dict, now: datetime) -> datetime:
@@ -71,9 +89,13 @@ def refresh_next_run(conn) -> dict:
 
 
 async def scheduler_loop():
-    """Forever-running async task. Wakes every TICK_SECONDS, checks the DB
-    schedule, and fires a post when next_run_at <= now."""
-    log.info("Scheduler started (tick=%ds)", TICK_SECONDS)
+    """Forever-running async task. Wakes every TICK_SECONDS *or* immediately
+    when request_wake() is called, checks the DB schedule, and fires a post
+    when next_run_at <= now."""
+    global _loop, _wake_event
+    _loop = asyncio.get_running_loop()
+    _wake_event = asyncio.Event()
+    log.info("Scheduler started (max tick=%ds, wake-on-change enabled)", TICK_SECONDS)
     # Lazy import — autoposter pulls in heavy deps we don't want at module load.
     import autoposter
 
@@ -103,7 +125,16 @@ async def scheduler_loop():
         except Exception:
             log.exception("Scheduler tick failed — will retry next tick")
 
-        await asyncio.sleep(TICK_SECONDS)
+        # Sleep until either TICK_SECONDS elapses OR someone calls
+        # request_wake() (e.g. the UI saved a new schedule). The wait_for
+        # timeout caps the idle period; the event wakes us early when set.
+        try:
+            await asyncio.wait_for(_wake_event.wait(), timeout=TICK_SECONDS)
+            log.debug("Scheduler woken by request_wake()")
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            _wake_event.clear()
 
 
 async def _fire_scheduled_run(conn, autoposter_mod):

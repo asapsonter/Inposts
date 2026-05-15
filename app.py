@@ -154,6 +154,9 @@ def write_schedule(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         conn.close()
+    # Kick the running scheduler so it picks up the new settings now
+    # instead of after its current sleep finishes (up to TICK_SECONDS).
+    scheduler.request_wake()
     return {"schedule": sched}
 
 
