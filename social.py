@@ -1,5 +1,8 @@
 import logging
 import sys
+import time
+from urllib.parse import quote
+
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -8,6 +11,54 @@ from config import config
 log = logging.getLogger("autoposter.social")
 
 LINKEDIN_API_VERSION = "202604"
+# How long to wait for LinkedIn to finish ingesting an uploaded image
+# before giving up and posting text-only. LinkedIn's image upload is
+# async — referencing the URN before it reaches AVAILABLE causes the
+# post to publish without the media attachment (no error, just dropped).
+IMAGE_READY_TIMEOUT_S = 15
+IMAGE_READY_POLL_INTERVAL_S = 0.5
+
+
+def _wait_for_image_available(image_urn: str, token: str) -> bool:
+    """Poll GET /rest/images/{urn} until status == 'AVAILABLE' or timeout.
+    Returns True if the image is ready to be referenced in a post."""
+    encoded = quote(image_urn, safe="")
+    url = f"https://api.linkedin.com/rest/images/{encoded}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "LinkedIn-Version": LINKEDIN_API_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+    }
+    deadline = time.monotonic() + IMAGE_READY_TIMEOUT_S
+    last_status = None
+    while time.monotonic() < deadline:
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                last_status = r.json().get("status")
+                if last_status == "AVAILABLE":
+                    log.info("Image %s ready (AVAILABLE).", image_urn)
+                    return True
+                if last_status in ("FAILED", "ERROR"):
+                    log.warning(
+                        "LinkedIn image processing failed (status=%s): %s",
+                        last_status, r.text[:300],
+                    )
+                    return False
+            else:
+                log.debug(
+                    "Image status check returned %d: %s",
+                    r.status_code, r.text[:200],
+                )
+        except requests.RequestException as e:
+            log.debug("Image status poll error (will retry): %s", e)
+        time.sleep(IMAGE_READY_POLL_INTERVAL_S)
+
+    log.warning(
+        "Image %s not AVAILABLE after %ds (last status=%s) — posting text-only.",
+        image_urn, IMAGE_READY_TIMEOUT_S, last_status,
+    )
+    return False
 
 
 def _upload_image_to_linkedin(image_url: str) -> str | None:
@@ -90,8 +141,15 @@ def publish_to_linkedin(
         )
         sys.exit(1)
 
-    # Upload image first (if provided) so we have a URN to embed in the post
+    # Upload image first (if provided) so we have a URN to embed in the post.
+    # Then wait for LinkedIn to finish ingesting it — referencing a still-
+    # processing URN causes the media to be silently dropped from the post.
     image_urn = _upload_image_to_linkedin(image_url) if image_url else None
+    if image_urn and not _wait_for_image_available(image_urn, token):
+        log.warning(
+            "Skipping image attachment because asset never became AVAILABLE."
+        )
+        image_urn = None
 
     payload = {
         "author": author,
@@ -112,9 +170,17 @@ def publish_to_linkedin(
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "LinkedIn-Version": LINKEDIN_API_VERSION,
+        # Required for the REST Posts API to correctly parse the
+        # `content.media` field. Without this header LinkedIn falls back to
+        # an older schema and silently drops the image attachment — the
+        # post still publishes (201) but with no media.
+        "X-Restli-Protocol-Version": "2.0.0",
     }
 
-    log.info("Publishing to LinkedIn …")
+    log.info(
+        "Publishing to LinkedIn (with image=%s) …",
+        "yes" if image_urn else "no",
+    )
     try:
         resp = requests.post(
             "https://api.linkedin.com/rest/posts",
