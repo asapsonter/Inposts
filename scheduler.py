@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
-from db import init_db, get_schedule, update_schedule
+from db import init_db, get_schedule, update_schedule, get_latest_post_time
 
 log = logging.getLogger("autoposter.scheduler")
 
@@ -79,10 +79,24 @@ def compute_next_run(schedule: dict, now: datetime) -> datetime:
 
 def refresh_next_run(conn) -> dict:
     """Recompute next_run_at based on current settings + last_run_at,
-    persist it, and return the fresh schedule row."""
+    persist it, and return the fresh schedule row.
+
+    Before computing, bump `last_run_at` to the timestamp of the most
+    recent row in the `posts` table if that's newer than what's stored.
+    The post history is the source of truth: if a post was made (by the
+    scheduler, the UI, or the CLI), it counts as the last run."""
     schedule = get_schedule(conn)
     if not schedule["enabled"]:
         return schedule
+
+    latest_post = _parse_post_timestamp(get_latest_post_time(conn))
+    stored_last = _parse_iso(schedule.get("last_run_at"))
+    if latest_post and (stored_last is None or latest_post > stored_last):
+        schedule = update_schedule(
+            conn,
+            last_run_at=latest_post.isoformat(timespec="seconds"),
+        )
+
     now = datetime.now()
     nxt = compute_next_run(schedule, now)
     return update_schedule(conn, next_run_at=nxt.isoformat(timespec="seconds"))
@@ -178,5 +192,16 @@ def _parse_iso(s: str | None) -> datetime | None:
         return None
     try:
         return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def _parse_post_timestamp(s: str | None) -> datetime | None:
+    """Parse a `posts.created_at` value. SQLite's `datetime('now')` writes
+    'YYYY-MM-DD HH:MM:SS'; older rows might be 'YYYY-MM-DDTHH:MM:SS'."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace(" ", "T"))
     except ValueError:
         return None
