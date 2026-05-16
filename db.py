@@ -148,3 +148,10 @@ def get_posts(conn: sqlite3.Connection):
     conn.row_factory = sqlite3.Row
     rows = conn.execute("SELECT * FROM posts ORDER BY created_at DESC").fetchall()
     return [dict(row) for row in rows]
+
+
+def get_latest_post_time(conn: sqlite3.Connection) -> str | None:
+    """Return the `created_at` of the most recent post, as an ISO-ish string
+    ('YYYY-MM-DD HH:MM:SS'), or None if there are no posts."""
+    row = conn.execute("SELECT MAX(created_at) FROM posts").fetchone()
+    return row[0] if row and row[0] else None
