@@ -53,9 +53,12 @@ def compute_next_run(schedule: dict, now: datetime) -> datetime:
         # If never run, fire one interval from "now". Otherwise from the last run.
         base = last_run if last_run else now
         nxt = base + timedelta(hours=n)
-        # Catch-up: if the computed time is already in the past (e.g. the
-        # server was offline), fire immediately rather than skipping.
-        return max(nxt, now)
+        # If the computed time is in the past (e.g. server was offline),
+        # slide forward by whole intervals to the next future slot — do
+        # NOT fire a backlog of missed posts on startup.
+        while nxt <= now:
+            nxt += timedelta(hours=n)
+        return nxt
 
     if mode == "daily_at":
         n = max(1, int(schedule.get("interval_days") or 1))
@@ -70,8 +73,10 @@ def compute_next_run(schedule: dict, now: datetime) -> datetime:
         nxt = datetime.combine(target_day, datetime.min.time()).replace(
             hour=h, minute=m
         )
-        if nxt <= now:
-            nxt += timedelta(days=1)
+        # Same no-catch-up rule as hourly: slide by whole interval_days
+        # steps so we land on a regular HH:MM slot in the future.
+        while nxt <= now:
+            nxt += timedelta(days=n)
         return nxt
 
     raise ValueError(f"Unknown schedule mode: {mode!r}")
