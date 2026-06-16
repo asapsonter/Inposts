@@ -1,0 +1,16 @@
+  1. See your current posts and their ids:
+  curl -s localhost:8000/api/posts | python3 -m json.tool
+  Note a couple of real id values from the output.
+
+  2. Validation check — empty list should be rejected with 400:
+  curl -s -X DELETE localhost:8000/api/posts \
+    -H "Content-Type: application/json" \
+    -d '{"ids": []}'
+  Expect: {"detail":"Provide a non-empty list of post ids."}
+
+  3. Safe no-op — deleting an id that doesn't exist returns deleted: 0 and harms nothing:
+  curl -s -X DELETE localhost:8000/api/posts \
+    -H "Content-Type: application/json" \
+    -d '{"ids": [999999]}'
+  Expect: {"deleted":0}
+

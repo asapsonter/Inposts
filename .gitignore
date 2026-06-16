@@ -45,6 +45,9 @@ logs/
 nohup.out
 /tmp/
 
+#docs
+curl_commands
+
 # Distribution
 *.tar.gz
 *.whl

@@ -48,11 +48,11 @@ RSS_FEEDS: List[Dict[str, Any]] = [
     #     "url": "https://hnrss.org/best",
     #     "has_comments": True,
     # },
-    # {
-    #     "name": "TechCrunch",
-    #     "url": "https://techcrunch.com/feed/",
-    #     "has_comments": False,
-    # },
+    {
+        "name": "TechCrunch",
+        "url": "https://techcrunch.com/feed/",
+        "has_comments": False,
+    },
     # {
     #     "name": "Wired (Top Stories)",
     #     "url": "https://www.wired.com/feed/rss",

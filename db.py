@@ -155,3 +155,16 @@ def get_latest_post_time(conn: sqlite3.Connection) -> str | None:
     ('YYYY-MM-DD HH:MM:SS'), or None if there are no posts."""
     row = conn.execute("SELECT MAX(created_at) FROM posts").fetchone()
     return row[0] if row and row[0] else None
+
+def delete_posts(conn: sqlite3.Connection, ids: list[int]) -> int: 
+    """delete catalog post by ID
+    remove dashboard record, it does not affect linkedin
+    """
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    cur = conn.execute( 
+                       f"DELETE FROM posts WHERE id IN ({placeholders})", list(ids)
+                       )
+    conn.commit()
+    return cur.rowcount 
