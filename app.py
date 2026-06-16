@@ -7,7 +7,8 @@ from fastapi.staticfiles import StaticFiles
 
 import autoposter
 import scheduler
-from db import init_db, get_posts, get_schedule, update_schedule
+from db import init_db, delete_posts, get_posts, get_schedule, update_schedule
+
 
 log = logging.getLogger("autoposter.app")
 
@@ -127,7 +128,8 @@ def read_schedule():
     """Return the current schedule plus the computed next-run timestamp."""
     conn = init_db()
     try:
-        sched = scheduler.refresh_next_run(conn) if get_schedule(conn)["enabled"] else get_schedule(conn)
+        sched = scheduler.refresh_next_run(conn) if get_schedule(conn)[
+            "enabled"] else get_schedule(conn)
     finally:
         conn.close()
     return {"schedule": sched}
@@ -158,6 +160,29 @@ def write_schedule(payload: dict = Body(...)):
     # instead of after its current sleep finishes (up to TICK_SECONDS).
     scheduler.request_wake()
     return {"schedule": sched}
+
+
+@app.delete("/api/posts")
+def delete_selected_posts(payload: dict = Body(...)):
+    """Remove selected posts from the catalog ( this dashboard)
+       Body: {"ids": [1, 2, 3]}. Does not unpublish from LinkedIn.
+    """
+    raw_ids = (payload or {}).get("ids", [])
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise HTTPException(
+            status_code=400, detail="Provide a non-empty list of post ids.")
+    try:
+        ids = [int(x) for x in raw_ids]
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400, detail="ids must all be integers. ")
+    conn = init_db()
+    try:
+        deleted = delete_posts(conn, ids)
+    finally:
+        conn.close()
+    return {"deleted": deleted}
+
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
