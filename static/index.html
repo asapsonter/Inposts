@@ -77,6 +77,15 @@
                 </button>
             </div>
         </header>
+        <!---catalog toolbar: select & bull -delete published posts-->
+        <div id="catalog-toolbar" class="catalog-toolbar hidden">
+            <span class="catalog-title"> Published posts</span>
+            <div class="catalog-actions">
+                 <button id="select-btn" type="button" class="ghost-btn">Select</button>
+                  <button id="delete-selected-btn" type="button" class="danger-btn hidden" disabled>Delete selected</button>
+                  <button id="cancel-select-btn" type="button" class="ghost-btn hidden">Cancel</button>
+            </div>
+        </div>
         <section id="posts-container" class="posts-grid">
             <!-- Dynamic Posts go here -->
         </section>
