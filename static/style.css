@@ -126,6 +126,7 @@ header p { color: var(--text-secondary); font-size: 1.2rem; }
     animation: spin 1s linear infinite; margin-bottom: 1rem;
 }
 .loader.hidden { display: none; }
+.hidden { display: none; }
 
 .empty-state { text-align: center; color: var(--text-secondary); grid-column: 1 / -1; padding: 4rem; background: var(--bg-card); border-radius: 16px; border: 1px dashed var(--border-color); }
 
