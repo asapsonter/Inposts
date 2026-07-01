@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import cronctl
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Body
@@ -156,6 +157,10 @@ def write_schedule(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         conn.close()
+    # Mirror the saved schedule into the system crontab so unattended posts
+    # fire at the UI-chosen time even when this app isn't running.
+    cronctl.sync_cron(sched)
+    # Kick the running scheduler so it picks up the new settings now    
     # Kick the running scheduler so it picks up the new settings now
     # instead of after its current sleep finishes (up to TICK_SECONDS).
     scheduler.request_wake()
@@ -182,7 +187,5 @@ def delete_selected_posts(payload: dict = Body(...)):
     finally:
         conn.close()
     return {"deleted": deleted}
-
-
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
