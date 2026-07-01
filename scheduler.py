@@ -7,9 +7,9 @@ app.py's lifespan. The CLI `autoposter.py --loop` also reads from the same
 schedule row, so the UI is the only place to change scheduling behavior.
 """
 
-import asyncio
+import  asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from db import init_db, get_schedule, update_schedule, get_latest_post_time
 
@@ -23,7 +23,7 @@ TICK_SECONDS = 60
 # Module-level handles set by scheduler_loop() at startup. request_wake()
 # uses these to nudge the running loop from any thread (FastAPI sync
 # handlers run in a thread pool, not on the event loop).
-_loop: asyncio.AbstractEventLoop | None = None
+_loop: asyncio.AbstractEventLoop | None = None 
 _wake_event: asyncio.Event | None = None
 
 
@@ -70,15 +70,17 @@ def compute_next_run(schedule: dict, now: datetime) -> datetime:
             # First run: today at HH:MM if that's still in the future,
             # otherwise tomorrow.
             target_day = now.date()
+            # build the HH:MM slot in the same (local) zone as 'now' so
+            # post_hour/post_minute keep their wall-clock meaning.
         nxt = datetime.combine(target_day, datetime.min.time()).replace(
-            hour=h, minute=m
+            hour=h, minute=m, tzinfo=now.tzinfo,
         )
         # Same no-catch-up rule as hourly: slide by whole interval_days
         # steps so we land on a regular HH:MM slot in the future.
         while nxt <= now:
             nxt += timedelta(days=n)
         return nxt
-
+        
     raise ValueError(f"Unknown schedule mode: {mode!r}")
 
 
@@ -97,12 +99,14 @@ def refresh_next_run(conn) -> dict:
     latest_post = _parse_post_timestamp(get_latest_post_time(conn))
     stored_last = _parse_iso(schedule.get("last_run_at"))
     if latest_post and (stored_last is None or latest_post > stored_last):
+        # created_at is UTC; store it in local time so it lines up with the
+        # scheduler's own (local) last_run_at writes.
         schedule = update_schedule(
             conn,
-            last_run_at=latest_post.isoformat(timespec="seconds"),
+            last_run_at=latest_post.astimezone().isoformat(timespec="seconds"),
         )
 
-    now = datetime.now()
+    now = datetime.now().astimezone()
     nxt = compute_next_run(schedule, now)
     return update_schedule(conn, next_run_at=nxt.isoformat(timespec="seconds"))
 
@@ -132,7 +136,7 @@ async def scheduler_loop():
                     # settings (someone may have just edited the schedule).
                     schedule = refresh_next_run(conn)
                     nxt = _parse_iso(schedule.get("next_run_at"))
-                    now = datetime.now()
+                    now = datetime.now().astimezone()
                     if nxt and nxt <= now:
                         log.info(
                             "Scheduler firing now (next_run_at=%s, mode=%s)",
@@ -159,7 +163,7 @@ async def scheduler_loop():
 async def _fire_scheduled_run(conn, autoposter_mod):
     """Run the fetch → generate → publish pipeline in a worker thread so
     we don't block the event loop with synchronous LinkedIn / Ollama I/O."""
-    started_at = datetime.now()
+    started_at = datetime.now().astimezone()
     try:
         await asyncio.to_thread(_run_pipeline_safely, autoposter_mod)
     except Exception:
@@ -193,20 +197,30 @@ def _run_pipeline_safely(autoposter_mod):
 
 
 def _parse_iso(s: str | None) -> datetime | None:
+    """Parse a stored schedule timestamp (last_run_at / next_run_at).
+    Legacy rows were written naive in local wall-clock; new rows carry an
+    offset. Always return an aware datetime."""
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s)
+        dt = datetime.fromisoformat(s)
     except ValueError:
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+    return dt    
 
 
 def _parse_post_timestamp(s: str | None) -> datetime | None:
     """Parse a `posts.created_at` value. SQLite's `datetime('now')` writes
-    'YYYY-MM-DD HH:MM:SS'; older rows might be 'YYYY-MM-DDTHH:MM:SS'."""
+    UTC as 'YYYY-MM-DD HH:MM:SS'; older rows might use a 'T' separator.
+    Always return an aware (UTC) datetime."""
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s.replace(" ", "T"))
+        dt = datetime.fromisoformat(s.replace(" ", "T"))
     except ValueError:
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
