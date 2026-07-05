@@ -83,5 +83,15 @@ RSS_FEEDS: List[Dict[str, Any]] = [
         "url": "https://techeconomy.ng/feed/",
         "has_comments": False,
     },
+    {
+        "name": "gizmodo",
+        "url": "https://gizmodo.com/feed/",
+        "has_comments": False,
+    },
+    {
+        "name": "engadget",
+        "url": "https://engadget.com/feed/",
+        "has_comments": False,
+    },
 
 ]
