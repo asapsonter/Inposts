@@ -38,6 +38,7 @@ env/
 
 # Claude Code local settings (per-developer permissions)
 .claude/
+CLAUDE.md
 
 # Logs & captured process output
 *.log
